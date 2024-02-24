@@ -52,8 +52,9 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${maven-comiler-plugin.version}</version>
                 <configuration>
-                    <source>11</source>
-                    <target>11</target>
+                    <source>21</source>
+                    <target>21</target>
+                    <failOnWarning>true</failOnWarning>
                 </configuration>
                 <executions>
                     <execution>
@@ -61,7 +62,7 @@
                         <configuration>
                             <compilerArgument>-proc:none</compilerArgument>
                             <includes>
-                                <include>pro/johndunlap/influx/InfluxProcessor.java</include>
+                                <include>org/voidzero/influx/InfluxProcessor.java</include>
                             </includes>
                         </configuration>
                     </execution>
