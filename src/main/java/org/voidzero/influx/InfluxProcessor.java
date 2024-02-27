@@ -31,6 +31,9 @@ import java.util.Set;
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
 public class InfluxProcessor extends AbstractProcessor {
 
+    // Get a boolean property from a system property
+    private final boolean isDebugMode = Boolean.getBoolean("influx.debug");
+
     /**
      * Cache of fully qualified class names which have already been processed.
      */
@@ -38,26 +41,22 @@ public class InfluxProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-        // We can't claim annotations that we don't have
+        // We can't claim annotations which weren't found by the compiler
         if (annotations.isEmpty()) {
             return false;
         }
 
         // Iterate over all annotations which were found by the compiler
         for (TypeElement annotation : annotations) {
-            System.out.println("Processing annotation: " + annotation.getQualifiedName().toString());
+            debug("Processing annotation: " + annotation.getQualifiedName().toString());
             switch (annotation.getQualifiedName().toString()) {
                 case "jakarta.inject.Singleton":
-                    processSingleton(annotation, roundEnv);
-                    break;
                 case "jakarta.inject.Named":
-                    processNamed(annotation, roundEnv);
+                case "org.voidzero.influx.Injector":
+                    processClass(annotation, roundEnv);
                     break;
                 case "jakarta.inject.Inject":
-                    processInject(annotation, roundEnv);
-                    break;
-                case "org.voidzero.influx.Injector":
-                    processInjector(annotation, roundEnv);
+                    processMethod(annotation, roundEnv);
                     break;
             }
         }
@@ -65,9 +64,10 @@ public class InfluxProcessor extends AbstractProcessor {
         return true;
     }
 
-    private void processSingleton(TypeElement annotation, RoundEnvironment roundEnv) {
+    private void processClass(TypeElement annotation, RoundEnvironment roundEnv) {
         // Get all elements that are annotated with the current annotation
         Set<? extends Element> elements = roundEnv.getElementsAnnotatedWith(annotation);
+        String annotationName = annotation.getQualifiedName().toString();
 
         // Iterate over all elements that are annotated with the current annotation
         for (Element element : elements) {
@@ -80,8 +80,6 @@ public class InfluxProcessor extends AbstractProcessor {
             }
 
             TypeElement typeElement = (TypeElement) element;
-
-            // Ugly...
             String className = typeElement.getQualifiedName().toString();
 
             // Skip classes we've already processed
@@ -92,29 +90,43 @@ public class InfluxProcessor extends AbstractProcessor {
             // Remember that we've processed this class before
             classCache.add(className);
 
-            // Perform some basic sanity checks
-            assertNotInterface(typeElement);
-            assertNotAbstractClass(typeElement);
-            assertHasNoArgConstructor(typeElement);
 
-            System.out.println("\tProcessing singleton: " + className);
-            System.out.println("\t\tIs interface: " + isInterface(typeElement));
-            System.out.println("\t\tIs class: " + isClass(typeElement));
-            System.out.println("\t\tIs concrete class: " + isConcreteClass(typeElement));
-            System.out.println("\t\tIs abstract class: " + isAbstractClass(typeElement));
+            // Perform some basic sanity checks
+            assertNotInterface(typeElement, annotation);
+            if (!roundEnv.errorRaised()) {
+                continue;
+            }
+
+            assertNotAbstractClass(typeElement, annotation);
+            if (!roundEnv.errorRaised()) {
+                continue;
+            }
+
+            assertHasNoArgConstructor(typeElement, annotation);
+            if (!roundEnv.errorRaised()) {
+                continue;
+            }
+
+            if(isDebugMode) {
+                debug("\tProcessing singleton: " + className);
+                debug("\t\tIs interface: " + isInterface(typeElement));
+                debug("\t\tIs class: " + isClass(typeElement));
+                debug("\t\tIs concrete class: " + isConcreteClass(typeElement));
+                debug("\t\tIs abstract class: " + isAbstractClass(typeElement));
+            }
         }
     }
 
     private void processNamed(TypeElement annotation, RoundEnvironment roundEnv) {
-        System.out.println("\tProcessing named: " + annotation.getEnclosingElement().getKind().toString());
+        debug("\tProcessing named: " + annotation.getEnclosingElement().getKind().toString());
     }
 
-    private void processInject(TypeElement annotation, RoundEnvironment roundEnv) {
-        System.out.println("\tProcessing inject: " + annotation.getEnclosingElement().getKind().toString());
+    private void processMethod(TypeElement annotation, RoundEnvironment roundEnv) {
+        debug("\tProcessing inject: " + annotation.getEnclosingElement().getKind().toString());
     }
 
     private void processInjector(TypeElement annotation, RoundEnvironment roundEnv) {
-        System.out.println("\tProcessing injector: " + annotation.getEnclosingElement().getKind().toString());
+        debug("\tProcessing injector: " + annotation.getEnclosingElement().getKind().toString());
     }
 
     private boolean isInterface(TypeElement classElement) {
@@ -149,35 +161,35 @@ public class InfluxProcessor extends AbstractProcessor {
         return false; // No default constructor found
     }
 
-    private void assertHasNoArgConstructor(TypeElement typeElement) {
-        String className = typeElement.getQualifiedName().toString();
-        if (!hasNoArgConstructor(typeElement)) {
+    private void assertHasNoArgConstructor(TypeElement classElement, TypeElement annotationElement) {
+        String className = classElement.getQualifiedName().toString();
+        if (!hasNoArgConstructor(classElement)) {
             processingEnv.getMessager().printMessage(
                 Diagnostic.Kind.ERROR,
-                className + " must have a no-arg or default constructor because it is annotated with @Singleton",
-                typeElement
+                "@" + annotationElement.getSimpleName() + " requires a constructor which accepts no arguments",
+                classElement
             );
         }
     }
 
-    private void assertNotInterface(TypeElement typeElement) {
-        String className = typeElement.getQualifiedName().toString();
-        if (isInterface(typeElement)) {
+    private void assertNotInterface(TypeElement classElement, TypeElement annotationElement) {
+        String className = classElement.getQualifiedName().toString();
+        if (isInterface(classElement)) {
             processingEnv.getMessager().printMessage(
                 Diagnostic.Kind.ERROR,
-                className + " cannot be an interface because it is annotated with @Singleton",
-                typeElement
+                "@" + annotationElement.getSimpleName() + " cannot be used on an interface",
+                classElement
             );
         }
     }
 
-    private void assertNotAbstractClass(TypeElement typeElement) {
-        String className = typeElement.getQualifiedName().toString();
-        if (isAbstractClass(typeElement)) {
+    private void assertNotAbstractClass(TypeElement classElement, TypeElement annotationElement) {
+        String className = classElement.getQualifiedName().toString();
+        if (isAbstractClass(classElement)) {
             processingEnv.getMessager().printMessage(
                 Diagnostic.Kind.ERROR,
-                className + " cannot be abstract because it is annotated with @Singleton",
-                typeElement
+                className + " cannot be abstract because it is annotated with @" + annotationElement.getSimpleName(),
+                classElement
             );
         }
     }
@@ -190,9 +202,15 @@ public class InfluxProcessor extends AbstractProcessor {
             out.println("package platform;");
             out.println("public class GeneratedClass {");
             out.println("    public static void generatedMethod() {");
-            out.println("        System.out.println(\"Generated method\");");
+            out.println("        debug(\"Generated method\");");
             out.println("    }");
             out.println("}");
+        }
+    }
+    
+    private void debug(String message) {
+        if (isDebugMode) {
+            System.out.println("[DEBUG] " + message);
         }
     }
 }
